@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <title>My first three.js app</title>
+
+<!-- <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background-color: black;
+      font-family: Arial, sans-serif;
+    }
+
+    /* Scoreboard Overlay */
+    #scoreboard {
+      position: absolute;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      color: white;
+      text-align: center;
+      z-index: 10;
+      pointer-events: none;
+    }
+
+    #scoreboard h4 {
+      margin: 0;
+      font-size: 24px;
+      color: white;
+    }
+
+    /* Start Screen */
+    #start-screen {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      color: white;
+      background-color: rgba(0, 0, 0, 0.85);
+      z-index: 20;
+    }
+
+    /* Game Over Screen */
+    #fail-screen {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      display: none;
+      /* Hidden by default */
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      color: red;
+      background-color: rgba(0, 0, 0, 0.85);
+      z-index: 20;
+    }
+  </style> __> -->
+</head>
+
+<body>
+  <!-- Scoreboard UI -->
+  <div id="scoreboard">
+    <h4>Score: <span id="score-val">0</span> | Misses: <span id="miss-val">0</span>/3</h4>
+  </div>
+
+  <!-- Start Screen Overlay -->
+  <div id="start-screen">
+    <h1>Egg Catching Game</h1>
+    <p>Press 'S' to start</p>
+  </div>
+
+  <!-- Fail / Game Over Screen Overlay -->
+  <div id="fail-screen">
+    <h1>GAME OVER</h1>
+    <p style="color: white;">3 eggs missed!</p>
+    <p style="color: white;">Press 'R' to Restart</p>
+  </div>
+
+  <script type="module" src="main.js"></script>
+
+  import * as THREE from 'three';
+import hotkeys from 'hotkeys-js';
+
+// DOM
+const startScreen = document.getElementById('start-screen');
+const failScreen = document.getElementById('fail-screen');
+const scoreVal = document.getElementById('score-val');
+const missVal = document.getElementById('miss-val');
+
+// Scene
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xd9b86c);
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+camera.position.z = 8;
+
+const renderer = new THREE.WebGLRenderer();
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+
+// Load textures
+const loader = new THREE.TextureLoader();
+const lionTexture = await loader.loadAsync('lion.png');
+const cowTexture = await loader.loadAsync('cow.png');
+const hyenaTexture = await loader.loadAsync('hyena.png');
+
+// Create lion
+const lion = new THREE.Mesh(
+  new THREE.PlaneGeometry(1.2, 1.2),
+  new THREE.MeshBasicMaterial({ map: lionTexture, transparent: true })
+);
+scene.add(lion);
+
+// Create cow
+const cow = new THREE.Mesh(
+  new THREE.PlaneGeometry(1, 1),
+  new THREE.MeshBasicMaterial({ map: cowTexture, transparent: true })
+);
+scene.add(cow);
+
+// Create hyena
+const hyena = new THREE.Mesh(
+  new THREE.PlaneGeometry(1, 1),
+  new THREE.MeshBasicMaterial({ map: hyenaTexture, transparent: true })
+);
+scene.add(hyena);
+
+// Collision boxes
+const lionBox = new THREE.Box3();
+const cowBox = new THREE.Box3();
+const hyenaBox = new THREE.Box3();
+
+// Settings
+const lionSpeed = 0.12;
+const cowSpeed = 0.07;
+const hyenaSpeed = 0.045;
+const maxX = 9;
+const maxY = 5;
+
+// Game state
+let gameStarted = false;
+let isGameOver = false;
+let score = 0;
+let misses = 0;
+
+function getRandom(min, max) {
+  return Math.random() * (max - min) + min;
+}
+
+// Put an animal at a random spot far from the lion
+function respawn(animal) {
+  animal.position.x = getRandom(-maxX, maxX);
+  animal.position.y = getRandom(-maxY, maxY);
+  while (animal.position.distanceTo(lion.position) < 5) {
+    animal.position.x = getRandom(-maxX, maxX);
+    animal.position.y = getRandom(-maxY, maxY);
+  }
+}
+
+// Move animal toward the lion (direction = 1) or away from it (direction = -1)
+function moveFromLion(animal, speed, direction) {
+  let dx = lion.position.x - animal.position.x;
+  let dy = lion.position.y - animal.position.y;
+  let length = Math.sqrt(dx * dx + dy * dy);
+
+  if (length > 0) {
+    animal.position.x += (dx / length) * speed * direction;
+    animal.position.y += (dy / length) * speed * direction;
+  }
+
+  // keep inside the screen
+  if (animal.position.x > maxX) animal.position.x = maxX;
+  if (animal.position.x < -maxX) animal.position.x = -maxX;
+  if (animal.position.y > maxY) animal.position.y = maxY;
+  if (animal.position.y < -maxY) animal.position.y = -maxY;
+}
+
+function resetGame() {
+  score = 0;
+  misses = 0;
+  isGameOver = false;
+  scoreVal.innerText = score;
+  missVal.innerText = misses;
+  failScreen.style.display = 'none';
+
+  lion.position.set(0, 0, 0);
+  respawn(cow);
+  respawn(hyena);
+}
+
+function animate() {
+  if (gameStarted && !isGameOver) {
+    // Lion controls
+    if (hotkeys.isPressed('a') && lion.position.x > -maxX) lion.position.x -= lionSpeed;
+    if (hotkeys.isPressed('d') && lion.position.x < maxX) lion.position.x += lionSpeed;
+    if (hotkeys.isPressed('w') && lion.position.y < maxY) lion.position.y += lionSpeed;
+    if (hotkeys.isPressed('s') && lion.position.y > -maxY) lion.position.y -= lionSpeed;
+
+    // Cow runs away, hyena chases
+    moveFromLion(cow, cowSpeed, -1);
+    moveFromLion(hyena, hyenaSpeed, 1);
+
+    // Update collision boxes after movement
+    lionBox.setFromObject(lion);
+    cowBox.setFromObject(cow);
+    hyenaBox.setFromObject(hyena);
+
+    // Lion catches cow
+    if (lionBox.intersectsBox(cowBox)) {
+      score += 1;
+      scoreVal.innerText = score;
+      respawn(cow);
+    }
+
+    // Hyena attacks lion
+    if (lionBox.intersectsBox(hyenaBox)) {
+      misses += 1;
+      missVal.innerText = misses;
+      respawn(hyena);
+
+      if (misses >= 3) {
+        isGameOver = true;
+        failScreen.style.display = 'flex';
+      }
+    }
+  }
+
+  renderer.render(scene, camera);
+}
+
+// Key bindings
+hotkeys('s', function () {
+  if (!gameStarted) {
+    gameStarted = true;
+    startScreen.style.display = 'none';
+    resetGame();
+  }
+});
+
+hotkeys('r', function () {
+  if (isGameOver) {
+    resetGame();
+  }
+});
+
+// Start
+resetGame();
+renderer.setAnimationLoop(animate);
+</body>
+
+</html>
